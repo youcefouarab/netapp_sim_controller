@@ -1,0 +1,20 @@
+RYU: 
+  # abs path to ryu directory
+  #PATH: /home/ouarab/ryu
+  # port number of ryu controller 
+  PORT: 6633
+
+NETWORK:
+  # decoy controller MAC
+  CONTROLLER_MAC: dd:dd:dd:dd:dd:dd
+  # decoy controller IP 
+  CONTROLLER_IP: 10.0.0.254
+  # in seconds, ARP table refresh interval
+  ARP_REFRESH: 60                   
+  # pool format <range1>,<range2>, ... ,<value1>,<value2>, ...
+  # range format <start_IP>:<end_IP>
+  IP_POOL: 10.0.0.1:10.0.0.4
+
+MONITOR:
+  # in seconds, monitoring interval
+  PERIOD: 2
