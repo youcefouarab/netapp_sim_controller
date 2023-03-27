@@ -116,7 +116,7 @@ class DelayMonitor(RyuApp):
         self._add_flow(
             datapath, 65535,
             parser.OFPMatch(eth_type=ETH_TYPE_IP, ip_proto=IPPROTO_ICMP,
-                            eth_dst=CONTROLLER_MAC),
+                            ipv4_dst=CONTROLLER_IP),
             [parser.OFPActionOutput(datapath.ofproto.OFPP_CONTROLLER)])
 
     @set_ev_cls(EventOFPPacketIn, MAIN_DISPATCHER)
