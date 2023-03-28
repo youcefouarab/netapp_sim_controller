@@ -68,6 +68,10 @@ class DelayMonitor(RyuApp):
     def _monitor(self):
         while True:
             try:
+                for ip in list(self.delay):
+                    if ip not in self._simple_arp._in_ports:
+                        self.delay.pop(ip, None)
+
                 for ip, (dpid, port) in self._simple_arp._in_ports.items():
                     self._send_icmp_packet(self._switches.dps[dpid], ip,
                                            self._simple_arp.arp_table[ip],

@@ -21,6 +21,7 @@ from ryu.controller.handler import set_ev_cls, MAIN_DISPATCHER
 from ryu.controller.ofp_event import EventOFPPacketIn, EventOFPEchoReply
 from ryu.lib.hub import spawn, sleep
 from ryu.topology.switches import LLDPPacket
+from ryu.topology.event import EventSwitchLeave
 
 from settings import *
 
@@ -136,3 +137,16 @@ class NetworkDelayDetector(RyuApp):
         except Exception as e:
             print(' *** ERROR in network_delay_detector._echo_reply_handler:',
                   e.__class__.__name__, e)
+
+    @set_ev_cls(EventSwitchLeave)
+    def _switch_leave_handler(self, ev):
+        dpid = ev.switch.dp.id
+        self.lldp_latency.pop(dpid, None)
+        for src in self.lldp_latency:
+            if dpid in self.lldp_latency[src]:
+                self.lldp_latency[src].pop(dpid, None)
+        self.echo_latency.pop(dpid, None)
+        self.delay.pop(dpid, None)
+        for src in self.delay:
+            if dpid in self.delay[src]:
+                self.delay[src].pop(dpid, None)

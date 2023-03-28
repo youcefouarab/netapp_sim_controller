@@ -20,6 +20,7 @@ from ryu.controller.ofp_event import (EventOFPPortStatsReply,
                                       EventOFPPortDescStatsReply)
 from ryu.ofproto.ofproto_v1_3 import OFPP_LOCAL
 from ryu.lib.hub import spawn, sleep
+from ryu.topology.event import EventSwitchLeave
 
 from settings import *
 
@@ -162,3 +163,15 @@ class NetworkMonitor(RyuApp):
                         max(capacity - up_speed * 8/10**6, 0),    # unit: Mbit/s
                         max(capacity - down_speed * 8/10**6, 0))  # unit: Mbit/s
                 # =====================================================
+
+    @set_ev_cls(EventSwitchLeave)
+    def _switch_leave_handler(self, ev):
+        dpid = ev.switch.dp.id
+        self.port_features.pop(dpid, None)
+        for dpid_, port_no in list(self.port_stats):
+            if dpid_ == dpid:
+                self.port_stats.pop((dpid, port_no), None)
+        for dpid_, port_no in list(self.port_speed):
+            if dpid_ == dpid:
+                self.port_speed.pop((dpid, port_no), None)
+        self.free_bandwidth.pop(dpid, None)

@@ -25,7 +25,7 @@ from ryu.lib.packet.arp import arp, ARP_REQUEST, ARP_REPLY
 from ryu.lib.packet.ether_types import ETH_TYPE_ARP
 from ryu.lib.mac import BROADCAST_STR
 from ryu.lib.hub import sleep, spawn
-from ryu.topology.event import EventSwitchEnter
+from ryu.topology.event import EventSwitchEnter, EventSwitchLeave
 
 from settings import *
 
@@ -164,3 +164,10 @@ class SimpleARP(RyuApp):
             else:
                 self._reply_arp(ev.msg.datapath, eth.src, arp_pkt.src_ip,
                                 ev.msg.match['in_port'])
+
+    @set_ev_cls(EventSwitchLeave)
+    def _switch_leave_handler(self, ev):
+        for ip in list(self._in_ports):
+            if self._in_ports[ip][0] == ev.switch.dp.id:
+                self.arp_table.pop(ip, None)
+                self._in_ports.pop(ip, None)
