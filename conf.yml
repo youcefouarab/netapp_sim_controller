@@ -7,7 +7,7 @@ RYU:
 NETWORK:
   # decoy controller MAC
   CONTROLLER_MAC: dd:dd:dd:dd:dd:dd
-  # decoy controller IP 
+  # decoy controller IP (must be in same subnet as hosts)
   CONTROLLER_IP: 10.0.0.254
   # in seconds, ARP table refresh interval
   ARP_REFRESH: 60                   
@@ -18,3 +18,14 @@ NETWORK:
 MONITOR:
   # in seconds, monitoring interval
   PERIOD: 2
+
+OPENSTACK: 
+  URL: https://dash.cloud.cerist.dz
+  AUTH_PORT: 5000
+  GNOCCHI_PORT: 8041
+  USERNAME: oyoucef
+  PASSWORD: pass
+  USER_DOMAIN_ID: default
+  USER_ID: 40bea06eefdc4dbb97cdbe03fb3d3b75
+  PROJECT_ID: 701ed6e74e5e41e48519e444cebe8598
+  ARCHIVE_POLICY: ceilometer-low

@@ -14,6 +14,7 @@ from .simple_arp import SimpleARP
 from .network_monitor import NetworkMonitor
 from .network_delay_detector import NetworkDelayDetector
 from .delay_monitor import DelayMonitor
+from .metrics import Metrics
 
 
 # ================
