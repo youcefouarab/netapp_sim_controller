@@ -15,10 +15,11 @@ CONF = ROOT_PATH + '/conf.yml'
 try:
     with open(CONF, 'r') as f:
         config = safe_load(f)
-        for sect in config:
-            for param in config[sect]:
-                if config[sect][param] != None:
-                    environ[sect + '_' + param] = str(config[sect][param])
+        for sect, params in config.items():
+            for param, value in params.items():
+                if value != None:
+                    environ[sect + '_' + param] = str(value)
+
 except Exception as e:
     print(' *** ERROR in config:', e.__class__.__name__, e)
     exit()

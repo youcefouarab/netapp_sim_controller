@@ -21,9 +21,9 @@ from ryu.controller.handler import set_ev_cls, MAIN_DISPATCHER
 from ryu.controller.ofp_event import EventOFPPacketIn, EventOFPEchoReply
 from ryu.lib.hub import spawn, sleep
 from ryu.topology.switches import LLDPPacket
-from ryu.topology.event import EventSwitchLeave
+from ryu.topology.event import EventSwitchLeave, EventLinkDelete
 
-from settings import *
+from common import *
 
 
 class NetworkDelayDetector(RyuApp):
@@ -37,7 +37,7 @@ class NetworkDelayDetector(RyuApp):
 
         Requirements:
         -------------
-        Switches app (built-in): for switch and port lists.
+        Switches app (built-in): for datapath and port lists.
 
         Attributes:
         ----------- 
@@ -47,15 +47,15 @@ class NetworkDelayDetector(RyuApp):
         echo_latency: dict mapping DPID to controller-switch latency 
         in seconds (two-way).
 
-        delay: dict mapping src DPID and dst DPID to link delay 
-        in seconds (one-way).
+        delay: dict mapping src DPID and dst DPID to link delay in seconds 
+        (one-way).
     '''
 
     def __init__(self, *args, **kwargs):
         super(NetworkDelayDetector, self).__init__(*args, **kwargs)
         self.name = NETWORK_DELAY_DETECTOR
 
-        self._switches = None
+        self._switches = get_app(SWITCHES)
 
         self.lldp_latency = {}
         self.echo_latency = {}
@@ -64,41 +64,31 @@ class NetworkDelayDetector(RyuApp):
 
     def _detector(self):
         while True:
-            try:
-                self._send_echo_requests()
-                for src in self.lldp_latency:
-                    if self.lldp_latency[src]:
-                        self.delay.setdefault(src, {})
-                        for dst in self.lldp_latency[src]:
-                            '''
-                                                Controller
-                                                |        |
-                                src_echo_latency|        |dst_echo_latency
-                                                |        |
-                                        SwitchA--------SwitchB
+            self._send_echo_requests()
+            for src, dsts in list(self.lldp_latency.items()):
+                self.delay.setdefault(src, {})
+                for dst, lldp_lat in list(dsts.items()):
+                    '''
+                                        Controller
+                                        |        |
+                        src_echo_latency|        |dst_echo_latency
+                                        |        |
+                                  SwitchA--------SwitchB
 
-                                fwd_lldp_latency------->
-                                                <-------rpl_lldp_latency
+                         fwd_lldp_latency------->
+                                         <-------rpl_lldp_latency
 
-                                fwd_delay = (fwd_lldp_latency - dst_echo_latency / 2)
-                                rpl_delay = (rpl_lldp_latency - src_echo_latency / 2)
-                            '''
-                            try:
-                                # one-way delay src -> dst
-                                self.delay[src][dst] = max(
-                                    0, (self.lldp_latency[src][dst]
-                                        - self.echo_latency[dst] / 2))
-                            except:
-                                self.delay[src][dst] = float('inf')
+                        fwd_delay = (fwd_lldp_latency - dst_echo_latency / 2)
+                        rpl_delay = (rpl_lldp_latency - src_echo_latency / 2)
+                    '''
+                    self.delay[src][dst] = max(
+                        0, (lldp_lat
+                            - self.echo_latency.get(dst, -float('inf')) / 2))
 
-            except Exception as e:
-                print(' *** ERROR in network_delay_detector._detector:',
-                      e.__class__.__name__, e)
-            finally:
-                sleep(MONITOR_PERIOD)
+            sleep(MONITOR_PERIOD)
 
     def _send_echo_requests(self):
-        for datapath in self._switches.dps.values():
+        for datapath in list(self._switches.dps.values()):
             datapath.send_msg(
                 datapath.ofproto_parser.OFPEchoRequest(
                     datapath, data=bytes('%f' % time(), 'utf-8')))
@@ -114,39 +104,39 @@ class NetworkDelayDetector(RyuApp):
         msg = ev.msg
         try:
             src_dpid, src_port_no = LLDPPacket.lldp_parse(msg.data)
-            for port in self._switches.ports:
-                if src_dpid == port.dpid and src_port_no == port.port_no:
-                    self.lldp_latency.setdefault(src_dpid, {})
-                    self.lldp_latency[src_dpid][msg.datapath.id] = (
-                        ev.timestamp - self._switches.ports[port].timestamp)
-                    return
 
         except LLDPPacket.LLDPUnknownFormat:
             return
 
-        except Exception as e:
-            print(' *** ERROR in network_delay_detector._lldp_packet_in_handler:',
-                  e.__class__.__name__, e)
+        else:
+            for port, port_data in list(self._switches.ports.items()):
+                lldp_timestamp = port_data.timestamp
+                if (lldp_timestamp
+                        and src_dpid == port.dpid
+                        and src_port_no == port.port_no):
+                    self.lldp_latency.setdefault(src_dpid, {})
+                    self.lldp_latency[src_dpid][msg.datapath.id] = (
+                        ev.timestamp - lldp_timestamp)
+                    return
 
     @set_ev_cls(EventOFPEchoReply, MAIN_DISPATCHER)
     def _echo_reply_handler(self, ev):
-        try:
-            self.echo_latency[ev.msg.datapath.id] = (
-                ev.timestamp - eval(ev.msg.data))
-
-        except Exception as e:
-            print(' *** ERROR in network_delay_detector._echo_reply_handler:',
-                  e.__class__.__name__, e)
+        msg = ev.msg
+        self.echo_latency[msg.datapath.id] = (ev.timestamp - eval(msg.data))
 
     @set_ev_cls(EventSwitchLeave)
     def _switch_leave_handler(self, ev):
         dpid = ev.switch.dp.id
         self.lldp_latency.pop(dpid, None)
-        for src in self.lldp_latency:
-            if dpid in self.lldp_latency[src]:
-                self.lldp_latency[src].pop(dpid, None)
+        for dsts in list(self.lldp_latency.values()):
+            dsts.pop(dpid, None)
         self.echo_latency.pop(dpid, None)
         self.delay.pop(dpid, None)
-        for src in self.delay:
-            if dpid in self.delay[src]:
-                self.delay[src].pop(dpid, None)
+        for dsts in list(self.delay.values()):
+            dsts.pop(dpid, None)
+
+    @set_ev_cls(EventLinkDelete)
+    def _link_delete_handler(self, ev):
+        link = ev.link
+        self.lldp_latency.get(link.src.dpid, {}).pop(link.dst.dpid, None)
+        self.delay.get(link.src.dpid, {}).pop(link.dst.dpid, None)

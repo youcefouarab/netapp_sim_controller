@@ -16,7 +16,7 @@
 from ipaddress import ip_address
 from re import sub
 
-from ryu.base.app_manager import RyuApp
+from ryu.base.app_manager import RyuApp, lookup_service_brick
 from ryu.controller.handler import set_ev_cls, MAIN_DISPATCHER
 from ryu.controller.ofp_event import EventOFPPacketIn
 from ryu.lib.packet.packet import Packet
@@ -25,9 +25,10 @@ from ryu.lib.packet.arp import arp, ARP_REQUEST, ARP_REPLY
 from ryu.lib.packet.ether_types import ETH_TYPE_ARP
 from ryu.lib.mac import BROADCAST_STR
 from ryu.lib.hub import sleep, spawn
-from ryu.topology.event import EventSwitchEnter, EventSwitchLeave
+from ryu.topology.event import (EventSwitchEnter, EventSwitchLeave,
+                                EventHostAdd)
 
-from settings import *
+from common import *
 
 
 # get individual IP addresses from IP_POOL
@@ -41,13 +42,14 @@ for _pool in _pools:
                         int(ip_address(_end).packed.hex(), 16) + 1):
             IPS.append(ip_address(ip).exploded)
 
-    except:
+    except ValueError:
         # if _pool is one value
         try:
             IPS.append(ip_address(_pool).exploded)
 
-        except Exception as e:
-            print(' *** ERROR in simple_arp:', e.__class__.__name__, e)
+        except ValueError:
+            print(' *** WARNING in simple_arp: invalid IP address pool or '
+                  'value %s.', _pool)
 
 
 class SimpleARP(RyuApp):
@@ -58,6 +60,13 @@ class SimpleARP(RyuApp):
         hosts' IP addresses to MAC addresses, updated periodically (by default 
         every 1 minute).
 
+        Also acts as ARP proxy; responding to hosts' ARP requests which are 
+        all directed to controller via flows installed on switches.
+
+        Requirements:
+        -------------
+        Switches app (built-in): for datapath list.
+
         Attributes:
         -----------
         arp_table: dict mapping hosts' IP addresses to MAC addresses.
@@ -66,11 +75,30 @@ class SimpleARP(RyuApp):
     def __init__(self, *args, **kwargs):
         super(SimpleARP, self).__init__(*args, **kwargs)
         self.name = SIMPLE_ARP
+        
+        self._switches = get_app(SWITCHES)
 
-        self._add_flow = None
+        self.arp_table = {CONTROLLER_IP: CONTROLLER_MAC}  # ip -> mac
+        self._reverse_arp_table = {CONTROLLER_MAC: CONTROLLER_IP}  # mac -> ip
+        self._in_ports = {}  # mac -> (dpid, port_no)
 
-        self.arp_table = {}
-        self._in_ports = {}
+        self._threads = {}
+
+    def _arp(self, datapath):
+        while datapath.id in self._switches.dps:
+            self._batch_arp(datapath, ip)
+            if not self.arp_table:
+                sleep(10)
+            else:
+                sleep(ARP_REFRESH)
+
+    def _batch_arp(self, datapath, ip, out_port=None):
+        for ip in IPS:
+            self._request_arp(datapath, ip, out_port)
+
+            # don't send ARP requests together to not overwhelm network
+            # with traffic and controller with handlers
+            sleep(0.05)
 
     def _request_arp(self, datapath, dst_ip, out_port=None):
         pkt = Packet()
@@ -95,15 +123,24 @@ class SimpleARP(RyuApp):
                 in_port=ofproto.OFPP_CONTROLLER, data=pkt.data,
                 actions=[parser.OFPActionOutput(out_port)]))
 
-    def _reply_arp(self, datapath, eth_dst, ip_dst, out_port):
+    def _reply_arp(self, datapath, requested_ip, eth_dst, ip_dst, out_port):
         # this is needed to resolve decoy controller ARP entries for ARP
         # poisoning prevention systems, by replying to ARP requests sent
         # to controller
+        # it also acts as ARP proxy
+        if requested_ip == CONTROLLER_IP:
+            requested_mac = CONTROLLER_MAC
+        else:
+            requested_mac = self.arp_table.get(requested_ip, None)
+
+        if not requested_mac:
+            return
+
         pkt = Packet()
         pkt.add_protocol(
-            ethernet(ethertype=ETH_TYPE_ARP, src=CONTROLLER_MAC, dst=eth_dst))
+            ethernet(ethertype=ETH_TYPE_ARP, src=requested_mac, dst=eth_dst))
         pkt.add_protocol(
-            arp(opcode=ARP_REPLY, src_mac=CONTROLLER_MAC, src_ip=CONTROLLER_IP,
+            arp(opcode=ARP_REPLY, src_mac=requested_mac, src_ip=requested_ip,
                 dst_mac=eth_dst, dst_ip=ip_dst))
         pkt.serialize()
 
@@ -116,39 +153,49 @@ class SimpleARP(RyuApp):
                 in_port=ofproto.OFPP_CONTROLLER, data=pkt.data,
                 actions=[parser.OFPActionOutput(out_port)]))
 
-    def _send_arp_requests(self, datapath):
-        while True:
-            try:
-                for ip in IPS:
-                    self._request_arp(datapath, ip)
-
-                    # don't send ARP requests together to not overwhelm
-                    # network with traffic and controller with handlers
-                    sleep(0.05)
-
-            except Exception as e:
-                print('simple_arp._send_arp_requests', e.__class__.__name__, e)
-
-            finally:
-                if not self.arp_table:
-                    sleep(10)
-                else:
-                    sleep(ARP_REFRESH)
-
+    def _add_flow(self, datapath, priority, match, actions):
+        parser = datapath.ofproto_parser
+        datapath.send_msg(
+            parser.OFPFlowMod(
+                datapath=datapath, priority=priority, match=match,
+                instructions=[parser.OFPInstructionActions(
+                    datapath.ofproto.OFPIT_APPLY_ACTIONS, actions)]))
+        
     @set_ev_cls(EventSwitchEnter)
     def _switch_enter_handler(self, ev):
         datapath = ev.switch.dp
         parser = datapath.ofproto_parser
 
         # install flow to allow ARP replies to reach controller decoy
-        while not self._add_flow:
-            sleep(0.1)
         self._add_flow(
             datapath, 65535,
-            parser.OFPMatch(eth_type=ETH_TYPE_ARP, arp_tpa=CONTROLLER_IP),
+            parser.OFPMatch(eth_type=ETH_TYPE_ARP),
             [parser.OFPActionOutput(datapath.ofproto.OFPP_CONTROLLER)])
 
-        spawn(self._send_arp_requests, datapath)
+        dpid = datapath.id
+        thread = self._threads.get(dpid, None)
+        if thread:
+            thread.kill()
+        self._threads[dpid] = spawn(self._arp, datapath)
+
+    @set_ev_cls(EventHostAdd)
+    def _host_add_handler(self, ev):
+        # some hosts may take a while before manifesting. when they do, send
+        # ARP requests without waiting for ARP_REFRESH
+        host = ev.host
+        mac = host.mac
+        if mac == CONTROLLER_MAC:
+            return
+
+        port = host.port
+        dpid = port.dpid
+        port_no = port.port_no
+        self._in_ports[mac] = (dpid, port_no)
+
+        if mac not in self._reverse_arp_table:
+            datapath = self._switches.dps.get(dpid, None)
+            if datapath:
+                self._batch_arp(datapath, ip, port_no)
 
     @set_ev_cls(EventOFPPacketIn, MAIN_DISPATCHER)
     def _arp_packet_in_handler(self, ev):
@@ -157,17 +204,28 @@ class SimpleARP(RyuApp):
         if arp_pkt:
             eth = pkt.get_protocol(ethernet)
             if eth.dst != BROADCAST_STR:
+                src = eth.src
                 src_ip = arp_pkt.src_ip
-                self.arp_table[src_ip] = eth.src
+                self.arp_table[src_ip] = src
+                self._reverse_arp_table[src] = src_ip
                 self._in_ports[src_ip] = (ev.msg.datapath.id,
                                           ev.msg.match['in_port'])
             else:
-                self._reply_arp(ev.msg.datapath, eth.src, arp_pkt.src_ip,
-                                ev.msg.match['in_port'])
+                dst_ip = arp_pkt.dst_ip
+                if dst_ip == CONTROLLER_IP:
+                    self._reply_arp(ev.msg.datapath, dst_ip, eth.src,
+                                    arp_pkt.src_ip, ev.msg.match['in_port'])
 
     @set_ev_cls(EventSwitchLeave)
     def _switch_leave_handler(self, ev):
-        for ip in list(self._in_ports):
-            if self._in_ports[ip][0] == ev.switch.dp.id:
+        dpid = ev.switch.dp.id
+        thread = self._threads.get(dpid, None)
+        if thread:
+            thread.kill()
+
+        for mac, (host_dpid, _) in list(self._in_ports.items()):
+            if host_dpid == dpid:
+                ip = self._reverse_arp_table.get(mac, None)
                 self.arp_table.pop(ip, None)
-                self._in_ports.pop(ip, None)
+                self._reverse_arp_table.pop(mac, None)
+                self._in_ports.pop(mac, None)

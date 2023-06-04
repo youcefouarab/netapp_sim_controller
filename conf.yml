@@ -13,7 +13,15 @@ NETWORK:
   ARP_REFRESH: 60                   
   # pool format <range1>,<range2>, ... ,<value1>,<value2>, ...
   # range format <start_IP>:<end_IP>
-  IP_POOL: 10.0.0.1:10.0.0.4
+  IP_POOL:  >
+    10.0.0.1:10.0.0.5,
+    10.10.0.10:10.10.0.12,
+    10.20.0.10:10.20.0.12,
+    10.30.0.10:10.30.0.12,
+    10.10.0.254,
+    10.20.0.254,
+    10.30.0.254,
+    10.0.0.250
 
 MONITOR:
   # in seconds, monitoring interval

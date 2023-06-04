@@ -1,5 +1,8 @@
 from os import getenv
 
+from ryu.base.app_manager import lookup_service_brick
+from ryu.lib.hub import sleep
+
 import config
 
 
@@ -8,6 +11,8 @@ import config
 #  =====================
 
 
+SWITCHES = 'switches'
+OFP_HANDLER = 'ofp_handler'
 SIMPLE_ARP = 'simple_arp'
 NETWORK_MONITOR = 'network_monitor'
 NETWORK_DELAY_DETECTOR = 'network_delay_detector'
@@ -95,3 +100,13 @@ if not OS_PROJECT_ID:
           'OPENSTACK:PROJECT_ID parameter missing from conf.yml.')
 
 OS_ARCHIVE_POLICY = getenv('OPENSTACK_ARCHIVE_POLICY', '')
+
+SERVICE_LOOKUP_INTERVAL = 1
+
+
+def get_app(app_name):
+    app = lookup_service_brick(app_name)
+    while not app:
+        sleep(SERVICE_LOOKUP_INTERVAL)
+        app = lookup_service_brick(app_name)
+    return app

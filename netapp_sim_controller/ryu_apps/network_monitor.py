@@ -14,15 +14,15 @@
 # limitations under the License.
 
 
-from ryu.base.app_manager import RyuApp
+from ryu.base.app_manager import RyuApp, lookup_service_brick
 from ryu.controller.handler import set_ev_cls, MAIN_DISPATCHER
 from ryu.controller.ofp_event import (EventOFPPortStatsReply,
                                       EventOFPPortDescStatsReply)
 from ryu.ofproto.ofproto_v1_3 import OFPP_LOCAL
 from ryu.lib.hub import spawn, sleep
-from ryu.topology.event import EventSwitchLeave
+from ryu.topology.event import EventSwitchLeave, EventPortDelete
 
-from settings import *
+from common import *
 
 
 class NetworkMonitor(RyuApp):
@@ -33,12 +33,12 @@ class NetworkMonitor(RyuApp):
 
         Requirements:
         -------------
-        Switches app (built-in): for switch list.
+        Switches app (built-in): for datapath and list.
 
         Attributes:
         -----------
-        port_features: dict mapping DPID and port number to tuple of port's 
-        state, connected link's state, and port's capacity in kB/s.
+        port_features: dict mapping DPID and port number (nested) to tuple of 
+        port's state, connected link's state, and port's capacity in kB/s.
 
         port_stats: dict mapping DPID and port number to list of 5 most recent 
         measures of port's Tx and Rx bytes, errors, and loss, and period of 
@@ -47,15 +47,15 @@ class NetworkMonitor(RyuApp):
         port_speed: dict mapping DPID and port number to list of 5 mist recent 
         measures of port's speeds (up and down) in B/s.
 
-        free_bandwidth: dict mapping DPID and port number to tuple of port's 
-        current available bandwidths (up and down) in Mbit/s.
+        free_bandwidth: dict mapping DPID and port number (nested) to tuple of 
+        port's current available bandwidths (up and down) in Mbit/s.
     '''
 
     def __init__(self, *args, **kwargs):
         super(NetworkMonitor, self).__init__(*args, **kwargs)
         self.name = NETWORK_MONITOR
 
-        self._switches = None
+        self._switches = get_app(SWITCHES)
 
         self.port_features = {}
         self.port_stats = {}
@@ -65,21 +65,19 @@ class NetworkMonitor(RyuApp):
 
     def _monitor(self):
         while True:
-            try:
-                for datapath in self._switches.dps.values():
-                    self._send_stats_request(datapath)
+            for datapath in list(self._switches.dps.values()):
+                parser = datapath.ofproto_parser
+                datapath.send_msg(parser.OFPPortDescStatsRequest(datapath, 0))
+                datapath.send_msg(parser.OFPPortStatsRequest(
+                    datapath, 0, datapath.ofproto.OFPP_ANY))
 
-            except Exception as e:
-                print(' *** ERROR in network_monitor._monitor:',
-                      e.__class__.__name__, e)
+                # Important! Don't send requests together, because that will
+                # generate a lot of replies almost at the same time, which
+                # will generate a lot of delay of waiting in queue when
+                # handling them.
+                sleep(0.05)
 
-            finally:
-                sleep(MONITOR_PERIOD)
-
-    def _send_stats_request(self, datapath):
-        parser = datapath.ofproto_parser
-        datapath.send_msg(parser.OFPPortDescStatsRequest(datapath, 0))
-        datapath.send_msg(parser.OFPPortStatsRequest(datapath, 0))
+            sleep(MONITOR_PERIOD)
 
     def _save_stats(self, _dict, key, value, length):
         _dict.setdefault(key, [])
@@ -92,6 +90,7 @@ class NetworkMonitor(RyuApp):
         msg = ev.msg
         datapath = msg.datapath
         ofproto = datapath.ofproto
+        parser = datapath.ofproto_parser
         config_dict = {ofproto.OFPPC_PORT_DOWN: 'Down',
                        ofproto.OFPPC_NO_RECV: 'No Recv',
                        ofproto.OFPPC_NO_FWD: 'No Fwd',
@@ -107,10 +106,20 @@ class NetworkMonitor(RyuApp):
             if port_no != OFPP_LOCAL:
                 config = port.config
                 state = port.state
+                curr_speed = 0
+                try:
+                    curr_speed = port.curr_speed
+
+                except AttributeError:
+                    for p in port.properties:
+                        if isinstance(p, parser.OFPPortDescPropEthernet):
+                            curr_speed = p.curr_speed
+                            break
+
                 self.port_features[dpid][port_no] = (
                     config_dict[config] if config in config_dict else 'up',
                     state_dict[state] if state in state_dict else 'up',
-                    port.curr_speed)
+                    curr_speed)
 
     @set_ev_cls(EventOFPPortStatsReply, MAIN_DISPATCHER)
     def _port_stats_reply_handler(self, ev):
@@ -148,30 +157,30 @@ class NetworkMonitor(RyuApp):
                 self._save_stats(
                     self.port_speed, key, (up_speed, down_speed), 5)
 
-                try:
-                    capacity = self.port_features[dpid][port_no][2] / 10**3
+                capacity = self.port_features.get(
+                    dpid, {}).get(port_no, (0, 0, 0))[2] / 10**3
 
-                except KeyError:
-                    pass
-
-                except Exception as e:
-                    print(' *** ERROR in network_monitor._port_stats_reply_handler:',
-                          e.__class__.__name__, e)
-
-                else:
-                    self.free_bandwidth[dpid][port_no] = (
-                        max(capacity - up_speed * 8/10**6, 0),    # unit: Mbit/s
-                        max(capacity - down_speed * 8/10**6, 0))  # unit: Mbit/s
+                self.free_bandwidth[dpid][port_no] = (
+                    max(capacity - up_speed * 8/10**6, 0),    # unit: Mbit/s
+                    max(capacity - down_speed * 8/10**6, 0))  # unit: Mbit/s
                 # =====================================================
 
     @set_ev_cls(EventSwitchLeave)
     def _switch_leave_handler(self, ev):
         dpid = ev.switch.dp.id
         self.port_features.pop(dpid, None)
-        for dpid_, port_no in list(self.port_stats):
-            if dpid_ == dpid:
-                self.port_stats.pop((dpid, port_no), None)
-        for dpid_, port_no in list(self.port_speed):
-            if dpid_ == dpid:
-                self.port_speed.pop((dpid, port_no), None)
+        for _, port_no in list(self.port_stats):
+            self.port_stats.pop((dpid, port_no), None)
+        for _, port_no in list(self.port_speed):
+            self.port_speed.pop((dpid, port_no), None)
         self.free_bandwidth.pop(dpid, None)
+
+    @set_ev_cls(EventPortDelete)
+    def _port_delete_handler(self, ev):
+        port = ev.port
+        dpid = port.dpid
+        port_no = port.port_no
+        self.port_features.get(dpid, {}).pop(port_no)
+        self.port_stats.pop((dpid, port_no), None)
+        self.port_speed.pop((dpid, port_no), None)
+        self.free_bandwidth.get(dpid, {}).pop(port_no, None)

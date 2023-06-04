@@ -8,7 +8,7 @@ from keystoneauth1.identity.v3 import Password
 from gnocchiclient.client import Client
 from gnocchiclient.exceptions import Conflict, NotFound
 
-from settings import *
+from common import *
 
 
 RESOURCE_TYPES = {
@@ -86,11 +86,11 @@ class Metrics(RyuApp):
         super(Metrics, self).__init__(*args, **kwargs)
         self.name = METRICS
 
-        self._switches = None
-        self._simple_arp = None
-        self._network_monitor = None
-        self._network_delay_detector = None
-        self._delay_monitor = None
+        self._switches = get_app(SWITCHES)
+        self._simple_arp = get_app(SIMPLE_ARP)
+        self._network_monitor = get_app(NETWORK_MONITOR)
+        self._network_delay_detector = get_app(NETWORK_DELAY_DETECTOR)
+        self._delay_monitor = get_app(DELAY_MONITOR)
 
         self._session = None
         self._client = None

@@ -27,24 +27,23 @@ from ryu.lib.packet.in_proto import IPPROTO_ICMP
 from ryu.lib.hub import spawn, sleep
 from ryu.topology.event import EventSwitchEnter
 
-from settings import *
+from common import *
 
 
 class DelayMonitor(RyuApp):
     '''
         Ryu app for monitoring delays between hosts and switches by sending 
-        hosts ICMP packets (pings) by means of their respective switches, 
+        ICMP packets (pings) to hosts by means of their respective switches, 
         receiving their responses, and calculating the total elapsed time. 
         The most recent measures are saved in a dictionary. 
 
         Requirements:
         -------------
-        Switches app (built-in): for switch list.
+        Switches app (built-in): for datapath list.
 
-        SimpleARP app: for ARP table and resolving decoy controller ARP 
-        entries.
+        SimpleARP app: for ARP table and ARP proxy.
 
-        NetworkDelayDetector app: for removing switch-controller latency.
+        NetworkDelayDetector app: for filtering switch-controller latency.
 
         Attributes:
         -----------
@@ -57,38 +56,37 @@ class DelayMonitor(RyuApp):
         self.name = DELAY_MONITOR
         self._hosts = set()
 
-        self._switches = None
-        self._simple_arp = None
-        self._network_delay_detector = None
-        self._add_flow = None
+        self._switches = get_app(SWITCHES)
+        self._simple_arp = get_app(SIMPLE_ARP)
+        self._network_delay_detector = get_app(NETWORK_DELAY_DETECTOR)
 
         self.delay = {}
+        self._mac_delay = {}
+        self._ip_2_mac = {}
         spawn(self._monitor)
 
     def _monitor(self):
         while True:
-            try:
-                for ip in list(self.delay):
-                    if ip not in self._simple_arp._in_ports:
-                        self.delay.pop(ip, None)
+            for ip in list(self.delay):
+                if ip not in self._simple_arp.arp_table:
+                    self.delay.pop(ip, None)
+                    self._mac_delay.pop(self._ip_2_mac.get(ip, None), None)
+                    self._ip_2_mac.pop(ip, None)
 
-                for ip, (dpid, port) in self._simple_arp._in_ports.items():
-                    self._send_icmp_packet(self._switches.dps[dpid], ip,
-                                           self._simple_arp.arp_table[ip],
-                                           port)
+            for ip, mac in list(self._simple_arp.arp_table.items()):
+                dpid, port = self._simple_arp._in_ports.get(mac,
+                                                            (None, None))
+                datapath = self._switches.dps.get(dpid, None)
+                if datapath:
+                    self._send_icmp_packet(datapath, ip, mac, port)
 
-                    # Important! Don't send pings together, because that will
-                    # generate a lot of replies almost at the same time, which
-                    # will generate a lot of delay of waiting in queue when
-                    # handling replies.
-                    sleep(0.05)
+                # Important! Don't send pings together, because that will
+                # generate a lot of replies almost at the same time, which
+                # will generate a lot of delay of waiting in queue when
+                # handling them.
+                sleep(0.05)
 
-            except Exception as e:
-                print(' *** ERROR in delay_monitor._monitor:',
-                      e.__class__.__name__, e)
-
-            finally:
-                sleep(MONITOR_PERIOD)
+            sleep(MONITOR_PERIOD)
 
     def _send_icmp_packet(self, datapath, dst_ip, dst_mac, out_port):
         pkt = Packet()
@@ -109,14 +107,20 @@ class DelayMonitor(RyuApp):
                 in_port=ofproto.OFPP_CONTROLLER, data=pkt.data,
                 actions=[parser.OFPActionOutput(out_port)]))
 
+    def _add_flow(self, datapath, priority, match, actions):
+        parser = datapath.ofproto_parser
+        datapath.send_msg(
+            parser.OFPFlowMod(
+                datapath=datapath, priority=priority, match=match,
+                instructions=[parser.OFPInstructionActions(
+                    datapath.ofproto.OFPIT_APPLY_ACTIONS, actions)]))
+        
     @set_ev_cls(EventSwitchEnter)
     def _switch_enter_handler(self, ev):
         datapath = ev.switch.dp
         parser = datapath.ofproto_parser
 
-        # install flow to allow ARP replies to reach controller decoy
-        while not self._add_flow:
-            sleep(0.1)
+        # install flow to allow ICMP replies to reach controller decoy
         self._add_flow(
             datapath, 65535,
             parser.OFPMatch(eth_type=ETH_TYPE_IP, ip_proto=IPPROTO_ICMP,
@@ -140,12 +144,20 @@ class DelayMonitor(RyuApp):
                     switch_host_lat = latency - ctrl_switch_lat
                 '''
                 try:
-                    self.delay[pkt.get_protocol(ipv4).src] = max(
-                        0, (ev.timestamp
-                            - float(icmp_pkt.data.data)
-                            - self._network_delay_detector.echo_latency[
-                                ev.msg.datapath.id]))
+                    s_timestamp = float(icmp_pkt.data.data)
 
-                except Exception as e:
-                    print(' *** ERROR in delay_monitor._icmp_packet_in_handler:',
-                          e.__class__.__name__, e)
+                except ValueError:
+                    return
+
+                else:
+                    ip_src = pkt.get_protocol(ipv4).src
+                    delay = max(
+                        0, (ev.timestamp
+                            - s_timestamp
+                            - self._network_delay_detector.echo_latency.get(
+                                ev.msg.datapath.id, 0)))
+                    self.delay[ip_src] = delay
+
+                    eth_src = eth.src
+                    self._mac_delay[eth_src] = delay
+                    self._ip_2_mac[ip_src] = eth_src
