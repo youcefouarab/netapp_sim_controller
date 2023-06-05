@@ -169,7 +169,7 @@ class SimpleARP(RyuApp):
         # install flow to allow ARP replies to reach controller decoy
         self._add_flow(
             datapath, 65535,
-            parser.OFPMatch(eth_type=ETH_TYPE_ARP),
+            parser.OFPMatch(eth_type=ETH_TYPE_ARP, arp_tpa=CONTROLLER_IP),
             [parser.OFPActionOutput(datapath.ofproto.OFPP_CONTROLLER)])
 
         dpid = datapath.id

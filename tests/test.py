@@ -40,4 +40,4 @@ client = _os_gnocchi_client()
 for measure in client.metric.get_measures('delay',
                                           resource_id='0000000000000001->0000000000000002'):
     print(measure[0].strftime('%m/%d/%Y, %H:%M:%S  '),
-          round(measure[2] * 1000, 2))
+          round(measure[2] * 1000, 2), 'ms')
