@@ -14,13 +14,15 @@
 # limitations under the License.
 
 
-from ryu.base.app_manager import RyuApp, lookup_service_brick
+from ryu.base.app_manager import RyuApp
 from ryu.controller.handler import set_ev_cls, MAIN_DISPATCHER
 from ryu.controller.ofp_event import (EventOFPPortStatsReply,
                                       EventOFPPortDescStatsReply)
 from ryu.ofproto.ofproto_v1_3 import OFPP_LOCAL
 from ryu.lib.hub import spawn, sleep
-from ryu.topology.event import EventSwitchLeave, EventPortDelete
+from ryu.topology.event import (EventSwitchLeave, EventPortDelete, 
+                                EventLinkAdd, EventLinkDelete)
+
 
 from common import *
 
@@ -61,6 +63,8 @@ class NetworkMonitor(RyuApp):
         self.port_stats = {}
         self.port_speed = {}
         self.free_bandwidth = {}
+        self._link_ports = {}
+        self.loss_rate = {}
         spawn(self._monitor)
 
     def _monitor(self):
@@ -132,12 +136,13 @@ class NetworkMonitor(RyuApp):
                 key = (dpid, port_no)
                 self._save_stats(
                     self.port_stats, key, (stat.tx_bytes, stat.rx_bytes,
+                                           stat.tx_packets, stat.rx_packets,
                                            stat.tx_errors, stat.rx_errors,
                                            stat.tx_dropped, stat.rx_dropped,
                                            stat.duration_sec,
                                            stat.duration_nsec), 5)
 
-                # =====================================================
+                # =============================================================
                 # this section of the code is changed from the original
                 # the original code combines up speed and down speed
                 # the new code separates them
@@ -150,10 +155,8 @@ class NetworkMonitor(RyuApp):
                     down_pre = tmp[-2][1]
                     period = (tmp[-1][-2] + tmp[-1][-1] / (10 ** 9)
                               - tmp[-2][-2] + tmp[-2][-1] / (10 ** 9))
-                up_speed = ((self.port_stats[key][-1][0] - up_pre) / period
-                            ) if period else 0
-                down_speed = ((self.port_stats[key][-1][1] - down_pre) / period
-                              ) if period else 0
+                up_speed = ((tmp[-1][0] - up_pre) / period) if period else 0
+                down_speed = ((tmp[-1][1] - down_pre) / period) if period else 0
                 self._save_stats(
                     self.port_speed, key, (up_speed, down_speed), 5)
 
@@ -163,7 +166,42 @@ class NetworkMonitor(RyuApp):
                 self.free_bandwidth[dpid][port_no] = (
                     max(capacity - up_speed * 8/10**6, 0),    # unit: Mbit/s
                     max(capacity - down_speed * 8/10**6, 0))  # unit: Mbit/s
-                # =====================================================
+                # =============================================================
+
+                # =============================================================
+                # code for loss rate calculation
+                # sometimes counters are reset leading to Rx being higher than
+                # Tx, so maybe use packet counts periodically?
+                dst_key = self._link_ports.get(key, (None, None))
+                if dst_key in self.port_stats:
+                    #tx_pre = 0
+                    #rx_pre = 0
+                    tx_pkt = 0
+                    if len(tmp) > 0: # > 1
+                        #tx_pre = tmp[-2][2]
+                        #rx_pre = tmp[-2][3]
+                        tx_pkt = tmp[-1][2]
+                    #tx_pkt = tmp[-1][2] - tx_pre
+                    #rx_pkt = tmp[-1][3] - rx_pre 
+
+                    dst_tmp = self.port_stats[dst_key]
+                    #dst_tx_pre = 0
+                    #dst_rx_pre = 0
+                    if len(dst_tmp) > 0: # > 1
+                        #dst_tx_pre = dst_tmp[-2][2]
+                        #dst_rx_pre = dst_tmp[-2][3]
+                        dst_rx_pkt = dst_tmp[-1][3]
+                    #dst_tx_pkt = dst_tmp[-1][2] - dst_tx_pre
+                    #dst_rx_pkt = dst_tmp[-1][3] - dst_rx_pre
+
+                    try:
+                        loss_rate = max(0, (tx_pkt - dst_rx_pkt) / tx_pkt)
+                    except:
+                        loss_rate = 1
+                    self.loss_rate[(key, dst_key)] = loss_rate
+                    #print(key, '->', dst_key, ':', round(loss_rate * 100, 2), 
+                    #      '%', '(Tx=%d,Rx=%d)' % (tx_pkt, dst_rx_pkt))
+                # =============================================================
 
     @set_ev_cls(EventSwitchLeave)
     def _switch_leave_handler(self, ev):
@@ -184,3 +222,15 @@ class NetworkMonitor(RyuApp):
         self.port_stats.pop((dpid, port_no), None)
         self.port_speed.pop((dpid, port_no), None)
         self.free_bandwidth.get(dpid, {}).pop(port_no, None)
+
+    @set_ev_cls(EventLinkAdd)
+    def _link_add_handler(self, ev):
+        link = ev.link
+        src = link.src
+        dst = link.dst
+        self._link_ports[(src.dpid, src.port_no)] = (dst.dpid, dst.port_no)
+
+    @set_ev_cls(EventLinkDelete)
+    def _link_delete_handler(self, ev):
+        src = ev.link.src
+        self._link_ports.pop(src.dpid, src.port_no)

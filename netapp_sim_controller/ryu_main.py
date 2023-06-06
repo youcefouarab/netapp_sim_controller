@@ -32,7 +32,7 @@ class RyuMain(RyuApp):
         self.delay_monitor = kwargs[DELAY_MONITOR]
         self.metrics = kwargs[METRICS]
 
-        spawn(self._test)
+        #spawn(self._test)
 
     def _test(self):
         from pprint import pprint
@@ -55,6 +55,8 @@ class RyuMain(RyuApp):
             #pprint(self.network_monitor.port_speed)
             #print()
             #pprint(self.network_monitor.free_bandwidth)
+            #print()
+            #pprint(self.network_monitor.loss_rate)
             #print()
             #for src in self.network_delay_detector.lldp_latency:
             #    for dst in self.network_delay_detector.lldp_latency[src]:
