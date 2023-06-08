@@ -72,6 +72,20 @@ class RyuMain(RyuApp):
             #        lat = self.network_delay_detector.delay[src][dst]
             #        print(src, '-->', dst, round(lat * 1000, 2), 'ms')
             #print()
-            #for ip, delay in self.delay_monitor.delay.items():
-            #    print(ip, ':', round(delay * 1000, 2), 'ms')
+            #for src, dst in self.network_delay_detector._delay_history:
+            #    delays = self.network_delay_detector._delay_history[(src,dst)]
+            #    print(src, '-->', dst, end='')
+            #    pprint([round(delay * 1000, 2) for delay in delays])
+            #print()
+            #for src in self.network_delay_detector.jitter:
+            #    for dst in self.network_delay_detector.jitter[src]:
+            #        jitter = self.network_delay_detector.jitter[src][dst]
+            #        print(src, '-->', dst, round(jitter * 1000, 2), 'ms')
+            #print()
+            #for ip, jitters in self.delay_monitor._delay_history.items():
+            #    print(ip, ':', end='')
+            #    pprint([round(jitter * 1000, 2) for jitter in jitters])
+            #print()
+            #for ip, jitter in self.delay_monitor.jitter.items():
+            #    print(ip, ':', round(jitter * 1000, 2), 'ms')
             #print()

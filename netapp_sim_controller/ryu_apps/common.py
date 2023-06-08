@@ -59,6 +59,20 @@ except:
           'Defaulting to 2 seconds.')
     MONITOR_PERIOD = 2
 
+try:
+    _monitor_samples = float(getenv('MONITOR_SAMPLES', None))
+    if _monitor_samples < 2:
+        print(' *** WARNING in settings: '
+              'MONITOR:SAMPLES parameter cannot be less than 2. '
+              'Defaulting to 5 samples.')
+        _monitor_samples = 5
+    MONITOR_SAMPLES = _monitor_samples
+except:
+    print(' *** WARNING in settings: '
+          'MONITOR:SAMPLES parameter invalid or missing from conf.yml. '
+          'Defaulting to 5 samples.')
+    MONITOR_SAMPLES = 5
+
 OS_URL = getenv('OPENSTACK_URL', '')
 if not OS_URL:
     print(' *** WARNING in settings: '

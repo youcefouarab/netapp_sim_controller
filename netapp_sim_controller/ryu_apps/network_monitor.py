@@ -42,12 +42,14 @@ class NetworkMonitor(RyuApp):
         port_features: dict mapping DPID and port number (nested) to tuple of 
         port's state, connected link's state, and port's capacity in kB/s.
 
-        port_stats: dict mapping DPID and port number to list of 5 most recent 
-        measures of port's Tx and Rx bytes, errors, and loss, and period of 
-        measure in seconds and nanoseconds.
+        port_stats: dict mapping DPID and port number to list of 
+        MONITOR_SAMPLES number of the most recent measures of port's Tx and Rx 
+        bytes, packets, errors, and dropped, and period of measure in seconds 
+        and nanoseconds.
 
-        port_speed: dict mapping DPID and port number to list of 5 mist recent 
-        measures of port's speeds (up and down) in B/s.
+        port_speed: dict mapping DPID and port number to list of of 
+        MONITOR_SAMPLES number of the most recent measures of port's speeds 
+        (up and down) in B/s.
 
         free_bandwidth: dict mapping DPID and port number (nested) to tuple of 
         port's current available bandwidths (up and down) in Mbit/s.
@@ -140,7 +142,8 @@ class NetworkMonitor(RyuApp):
                                            stat.tx_errors, stat.rx_errors,
                                            stat.tx_dropped, stat.rx_dropped,
                                            stat.duration_sec,
-                                           stat.duration_nsec), 5)
+                                           stat.duration_nsec), 
+                                           MONITOR_SAMPLES)
 
                 # =============================================================
                 # this section of the code is changed from the original
@@ -158,7 +161,8 @@ class NetworkMonitor(RyuApp):
                 up_speed = ((tmp[-1][0] - up_pre) / period) if period else 0
                 down_speed = ((tmp[-1][1] - down_pre) / period) if period else 0
                 self._save_stats(
-                    self.port_speed, key, (up_speed, down_speed), 5)
+                    self.port_speed, key, (up_speed, down_speed), 
+                    MONITOR_SAMPLES)
 
                 capacity = self.port_features.get(
                     dpid, {}).get(port_no, (0, 0, 0))[2] / 10**3

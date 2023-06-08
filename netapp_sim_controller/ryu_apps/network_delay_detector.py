@@ -60,6 +60,8 @@ class NetworkDelayDetector(RyuApp):
         self.lldp_latency = {}
         self.echo_latency = {}
         self.delay = {}
+        self._delay_history = {}
+        self.jitter = {}
         spawn(self._detector)
 
     def _detector(self):
@@ -67,6 +69,7 @@ class NetworkDelayDetector(RyuApp):
             self._send_echo_requests()
             for src, dsts in list(self.lldp_latency.items()):
                 self.delay.setdefault(src, {})
+                self.jitter.setdefault(src, {})
                 for dst, lldp_lat in list(dsts.items()):
                     '''
                                         Controller
@@ -81,9 +84,21 @@ class NetworkDelayDetector(RyuApp):
                         fwd_delay = (fwd_lldp_latency - dst_echo_latency / 2)
                         rpl_delay = (rpl_lldp_latency - src_echo_latency / 2)
                     '''
-                    self.delay[src][dst] = max(
+                    delay = max(
                         0, (lldp_lat
                             - self.echo_latency.get(dst, -float('inf')) / 2))
+                    self.delay[src][dst] = delay 
+
+                    # =========================================================
+                    # code for jitter calculations
+                    key = (src, dst)
+                    self._save_stats(self._delay_history, key, delay, 
+                                     MONITOR_SAMPLES)
+                    if len(self._delay_history[key]) > 1:
+                        self.jitter[src][dst] = abs(
+                            self._delay_history[key][1]
+                            - self._delay_history[key][0])
+                    # =========================================================
 
             sleep(MONITOR_PERIOD)
 
@@ -98,6 +113,12 @@ class NetworkDelayDetector(RyuApp):
             # will generate a lot of delay of waiting in queue when handling
             # echo replies.
             sleep(0.05)
+
+    def _save_stats(self, _dict, key, value, length):
+        _dict.setdefault(key, [])
+        _dict[key].append(value)
+        if len(_dict[key]) > length:
+            _dict[key].pop(0)
 
     @set_ev_cls(EventOFPPacketIn, MAIN_DISPATCHER)
     def _lldp_packet_in_handler(self, ev):

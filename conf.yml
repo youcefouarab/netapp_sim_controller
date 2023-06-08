@@ -26,6 +26,8 @@ NETWORK:
 MONITOR:
   # in seconds, monitoring interval
   PERIOD: 2
+  # number of samples of measures to retain
+  SAMPLES: 5
 
 OPENSTACK: 
   URL: https://dash.cloud.cerist.dz

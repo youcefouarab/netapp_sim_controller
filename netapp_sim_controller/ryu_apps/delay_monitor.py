@@ -63,6 +63,9 @@ class DelayMonitor(RyuApp):
         self.delay = {}
         self._mac_delay = {}
         self._ip_2_mac = {}
+        self._delay_history = {}
+        self.jitter = {}
+        self._mac_jitter = {}
         spawn(self._monitor)
 
     def _monitor(self):
@@ -114,7 +117,13 @@ class DelayMonitor(RyuApp):
                 datapath=datapath, priority=priority, match=match,
                 instructions=[parser.OFPInstructionActions(
                     datapath.ofproto.OFPIT_APPLY_ACTIONS, actions)]))
-        
+
+    def _save_stats(self, _dict, key, value, length):
+        _dict.setdefault(key, [])
+        _dict[key].append(value)
+        if len(_dict[key]) > length:
+            _dict[key].pop(0)
+
     @set_ev_cls(EventSwitchEnter)
     def _switch_enter_handler(self, ev):
         datapath = ev.switch.dp
@@ -161,3 +170,15 @@ class DelayMonitor(RyuApp):
                     eth_src = eth.src
                     self._mac_delay[eth_src] = delay
                     self._ip_2_mac[ip_src] = eth_src
+
+                    # =========================================================
+                    # code for jitter calculations
+                    self._save_stats(self._delay_history, ip_src, delay, 
+                                     MONITOR_SAMPLES)
+                    if len(self._delay_history[ip_src]) > 1:
+                        jitter = abs(
+                            self._delay_history[ip_src][1]
+                            - self._delay_history[ip_src][0])
+                        self.jitter[ip_src] = jitter
+                        self._mac_jitter[eth_src] = jitter
+                    # =========================================================
