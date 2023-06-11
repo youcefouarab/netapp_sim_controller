@@ -30,6 +30,7 @@ MONITOR:
   SAMPLES: 5
 
 OPENSTACK: 
+  VERIFY_CERT: False # False means accept insecure connections
   URL: https://dash.cloud.cerist.dz
   AUTH_PORT: 5000
   GNOCCHI_PORT: 8041

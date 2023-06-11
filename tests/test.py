@@ -1,43 +1,23 @@
-from os import getenv
+from urllib3 import disable_warnings
+from urllib3.exceptions import InsecureRequestWarning
 
 from keystoneauth1.session import Session
 from keystoneauth1.identity.v3 import Password
 from gnocchiclient.client import Client
 
-from context import config
+from context import *
 
 
-OS_URL = getenv('OPENSTACK_URL', '')
-OS_AUTH_PORT = getenv('OPENSTACK_AUTH_PORT', '')
-OS_GNOCCHI_PORT = getenv('OPENSTACK_GNOCCHI_PORT', '')
-OS_USERNAME = getenv('OPENSTACK_USERNAME', '')
-OS_PASSWORD = getenv('OPENSTACK_PASSWORD', '')
-OS_USER_DOMAIN_ID = getenv('OPENSTACK_USER_DOMAIN_ID', '')
-OS_USER_ID = getenv('OPENSTACK_USER_ID', '')
-OS_PROJECT_ID = getenv('OPENSTACK_PROJECT_ID', '')
-OS_ARCHIVE_POLICY = getenv('OPENSTACK_ARCHIVE_POLICY', '')
-
-_client = None
+if not OS_VERIFY_CERT:
+    disable_warnings(InsecureRequestWarning)
+client = Client(1, Session(Password(auth_url=OS_URL + ':' + OS_AUTH_PORT,
+                                    username=OS_USERNAME, password=OS_PASSWORD,
+                                    user_domain_id=OS_USER_DOMAIN_ID,
+                                    project_id=OS_PROJECT_ID),
+                           verify=OS_VERIFY_CERT))
 
 
-def _os_authenticate():
-    return Session(Password(auth_url=OS_URL + ':' + OS_AUTH_PORT,
-                            username=OS_USERNAME, password=OS_PASSWORD,
-                            user_domain_id=OS_USER_DOMAIN_ID,
-                            project_id=OS_PROJECT_ID))
-
-
-def _os_gnocchi_client():
-    # 'singleton' gnocchi client
-    global _client
-    if not _client:
-        _client = Client(1, _os_authenticate())
-    return _client
-
-
-client = _os_gnocchi_client()
-
-for measure in client.metric.get_measures('delay',
+for measure in client.metric.get_measures('loss_rate',
                                           resource_id='0000000000000001->0000000000000002'):
     print(measure[0].strftime('%m/%d/%Y, %H:%M:%S  '),
-          round(measure[2] * 1000, 2), 'ms')
+          round(measure[2] * 100, 2), '%')

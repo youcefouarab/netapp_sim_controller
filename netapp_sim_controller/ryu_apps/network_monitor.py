@@ -202,7 +202,8 @@ class NetworkMonitor(RyuApp):
                         loss_rate = max(0, (tx_pkt - dst_rx_pkt) / tx_pkt)
                     except:
                         loss_rate = 1
-                    self.loss_rate[(key, dst_key)] = loss_rate
+                    self.loss_rate.setdefault(dpid, {})
+                    self.loss_rate[dpid][dst_key[0]] = loss_rate
                     #print(key, '->', dst_key, ':', round(loss_rate * 100, 2), 
                     #      '%', '(Tx=%d,Rx=%d)' % (tx_pkt, dst_rx_pkt))
                 # =============================================================

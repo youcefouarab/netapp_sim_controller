@@ -73,6 +73,8 @@ except:
           'Defaulting to 5 samples.')
     MONITOR_SAMPLES = 5
 
+OS_VERIFY_CERT = getenv('OPENSTACK_VERIFY_CERT', False) == 'True'
+
 OS_URL = getenv('OPENSTACK_URL', '')
 if not OS_URL:
     print(' *** WARNING in settings: '

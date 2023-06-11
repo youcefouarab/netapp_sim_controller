@@ -56,7 +56,10 @@ class RyuMain(RyuApp):
             #print()
             #pprint(self.network_monitor.free_bandwidth)
             #print()
-            #pprint(self.network_monitor.loss_rate)
+            #for src in self.network_monitor.loss_rate:
+            #    for dst in self.network_monitor.loss_rate[src]:
+            #        loss = self.network_monitor.loss_rate[src][dst]
+            #        print(src, '-->', dst, round(loss * 100, 2), '%')
             #print()
             #for src in self.network_delay_detector.lldp_latency:
             #    for dst in self.network_delay_detector.lldp_latency[src]:

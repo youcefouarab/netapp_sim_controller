@@ -1,4 +1,6 @@
 from time import time
+from urllib3 import disable_warnings
+from urllib3.exceptions import InsecureRequestWarning
 
 from ryu.base.app_manager import RyuApp
 from ryu.lib.hub import spawn, sleep
@@ -57,8 +59,8 @@ RESOURCE_TYPES = {
                 }
             }
         },
-        'metrics': ['bandwidth', 'delay'],
-        'units': ['Mbit/s', 's']
+        'metrics': ['bandwidth', 'delay', 'jitter', 'loss_rate'],
+        'units': ['Mbit/s', 's', 's', '']
     }
 }
 
@@ -107,7 +109,7 @@ class Metrics(RyuApp):
 
     def _add_measures(self):
         while True:
-            err = False
+            sleep(MONITOR_PERIOD)
             try:
                 measures = {}
                 t = time()
@@ -159,6 +161,14 @@ class Metrics(RyuApp):
                                     'delay': [{
                                         'timestamp': t,
                                         'value': delay
+                                    }],
+                                    'jitter': [{
+                                        'timestamp': t,
+                                        'value': self._network_delay_detector.jitter[src_dpid][dst_dpid]
+                                    }],
+                                    'loss_rate': [{
+                                        'timestamp': t,
+                                        'value': self._network_monitor.loss_rate[src_dpid][dst_dpid]
                                     }]
                                 }
                             })
@@ -169,6 +179,8 @@ class Metrics(RyuApp):
 
                 for src, delay in self._delay_monitor.delay.items():
                     try:
+                        delay = delay / 2
+                        jitter = self._delay_monitor.jitter[src] / 2
                         dst = str(self._simple_arp._in_ports[src][0]).zfill(16)
                         id = src + '->' + dst
                         self._ensure_resource('sdn_link', {
@@ -182,6 +194,10 @@ class Metrics(RyuApp):
                                 'delay': [{
                                     'timestamp': t,
                                     'value': delay
+                                }],
+                                'jitter': [{
+                                    'timestamp': t,
+                                    'value': jitter
                                 }]
                             }
                         })
@@ -198,6 +214,10 @@ class Metrics(RyuApp):
                                 'delay': [{
                                     'timestamp': t,
                                     'value': delay
+                                }],
+                                'jitter': [{
+                                    'timestamp': t,
+                                    'value': jitter
                                 }]
                             }
                         })
@@ -207,32 +227,27 @@ class Metrics(RyuApp):
                               e.__class__.__name__, e)
 
             except Exception as e:
-                err = True
                 print(' *** ERROR in metrics._add_measures:',
                       e.__class__.__name__, e)
 
             else:
                 try:
-                    self._client.metric.batch_resources_metrics_measures(
-                        measures)
+                    print(self._client.metric.batch_resources_metrics_measures(
+                        measures))
 
                 except Exception as e:
-                    err = True
                     print(' *** ERROR in metrics._add_measures:',
                           e.__class__.__name__, e)
 
-            finally:
-                if err:
-                    sleep(1)
-                else:
-                    sleep(MONITOR_PERIOD)
-
     def _os_authenticate(self):
+        if not OS_VERIFY_CERT: 
+            disable_warnings(InsecureRequestWarning)
         self._session = Session(Password(auth_url=OS_URL + ':' + OS_AUTH_PORT,
                                          username=OS_USERNAME,
                                          password=OS_PASSWORD,
                                          user_domain_id=OS_USER_DOMAIN_ID,
-                                         project_id=OS_PROJECT_ID))
+                                         project_id=OS_PROJECT_ID),
+                                verify=OS_VERIFY_CERT)
         self._client = Client(1, self._session)
 
     def _os_ensure_resource_types(self):
