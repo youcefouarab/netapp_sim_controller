@@ -19,6 +19,10 @@ NETWORK_DELAY_DETECTOR = 'network_delay_detector'
 DELAY_MONITOR = 'delay_monitor'
 METRICS = 'metrics'
 
+WSGI = 'wsgi'
+DPSET = 'dpset'
+FLOW_MANAGER = 'flowmanager'
+
 
 # ==============
 #      CONFIG

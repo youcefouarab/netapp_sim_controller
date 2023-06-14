@@ -1,9 +1,19 @@
-from ryu.base.app_manager import RyuApp
+from logging import getLogger, WARNING
+
+from ryu.base.app_manager import RyuApp, require_app
 from ryu.controller.ofp_handler import OFPHandler
 from ryu.topology.switches import Switches
+from ryu.controller.dpset import DPSet
+from ryu.app.wsgi import WSGIApplication
 from ryu.lib.hub import spawn, sleep
 
 from ryu_apps import *
+
+
+require_app('ryu.app.rest_topology')
+
+# hide WSGI messages on console
+getLogger('ryu.lib.hub').setLevel(WARNING)
 
 
 class RyuMain(RyuApp):
@@ -20,7 +30,11 @@ class RyuMain(RyuApp):
         NETWORK_MONITOR: NetworkMonitor,
         NETWORK_DELAY_DETECTOR: NetworkDelayDetector,
         DELAY_MONITOR: DelayMonitor,
-        METRICS: Metrics
+        METRICS: Metrics,
+
+        WSGI: WSGIApplication,
+        DPSET: DPSet,
+        FLOW_MANAGER: FlowManager
     }
 
     def __init__(self, *args, **kwargs):
@@ -31,6 +45,12 @@ class RyuMain(RyuApp):
         self.network_delay_detector = kwargs[NETWORK_DELAY_DETECTOR]
         self.delay_monitor = kwargs[DELAY_MONITOR]
         self.metrics = kwargs[METRICS]
+
+        self.wsgi = kwargs[WSGI]
+        self.dpset = kwargs[DPSET]
+        self.flowmanager = kwargs[FLOW_MANAGER]
+        self.flowmanager.wsgi = self.wsgi
+        self.flowmanager.dpset = self.dpset
 
         spawn(self._test)
 

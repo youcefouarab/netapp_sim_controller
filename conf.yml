@@ -1,8 +1,11 @@
 RYU: 
   # abs path to ryu directory
-  #PATH: /home/ouarab/ryu
+  PATH: /home/ouarab/ryu
   # port number of ryu controller 
   PORT: 6633
+  # port number of ryu web API
+  API_PORT: 8080
+
 
 NETWORK:
   # decoy controller MAC

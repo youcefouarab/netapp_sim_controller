@@ -23,17 +23,30 @@ except:
           'conf.yml. Defaulting to 6633.')
     RYU_PORT = 6633
 
+try:
+    RYU_API_PORT = int(getenv('RYU_API_PORT', None))
+except:
+    print(' *** WARNING in server: RYU:API_PORT parameter invalid of missing '
+          'from conf.yml. Defaulting to 8080.')
+    RYU_API_PORT = 8080
+
 RYU_PATH = getenv('RYU_PATH', '')
 RYU_BIN_PATH = RYU_PATH + '/bin/ryu'
 RYU_MANAGER_PATH = RYU_PATH + '/bin/ryu-manager'
+RYU_GUI_PATH = RYU_PATH + '/ryu/app/gui_topology/gui_topology.py'
 
 RYU_MAIN_PATH = dirname(abspath(__file__)) + '/ryu_main.py'
 
 
 def start():
-    cmd = [RYU_BIN_PATH if exists(RYU_BIN_PATH) else 'ryu', 'run',
-           RYU_MAIN_PATH, '--observe-links', '--ofp-tcp-listen-port',
-           str(RYU_PORT)]
+    cmd = [RYU_BIN_PATH if exists(RYU_BIN_PATH) else 'ryu', 'run']
+    if exists(RYU_GUI_PATH):
+        cmd.append(RYU_GUI_PATH)
+    else:
+        print(' *** WARNING in server.serve:', RYU_GUI_PATH, 'not found. '
+              'Make sure to configure RYU:PATH parameter in conf.yml')
+    cmd.extend([RYU_MAIN_PATH, '--observe-links', '--ofp-tcp-listen-port',
+                str(RYU_PORT), '--wsapi-port', str(RYU_API_PORT)])
     try:
         run(cmd)
 
